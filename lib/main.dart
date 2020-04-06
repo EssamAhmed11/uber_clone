@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:uberclone/home.dart';
+import 'package:uberclone/Screens/home.dart';
+import 'package:provider/provider.dart';
 
-void main() => runApp(MyApp());
+void main() => runApp(MultiProvider(
+      providers: [],
+      child: MyApp(),
+    ));
 
 class MyApp extends StatelessWidget {
   // This widget is the root of your application.
