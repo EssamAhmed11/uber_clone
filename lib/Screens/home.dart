@@ -1,16 +1,18 @@
 import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:uberclone/utils/utils.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_webservice/places.dart';
+import 'package:provider/provider.dart';
 import 'package:uberclone/requests/google_maps_requests.dart';
+import 'package:uberclone/states/app_state.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
+import 'package:flutter_google_places/flutter_google_places.dart';
 
 class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
-
   final String title;
   static const String ApiKey = 'AIzaSyBmTW7JpL-M7jf2UU5m9smWHR8btSkvcL8';
+  MyHomePage({Key key, this.title}) : super(key: key);
+
   @override
   _MyHomePageState createState() => _MyHomePageState();
 }
@@ -31,42 +33,53 @@ class Map extends StatefulWidget {
   _MapState createState() => _MapState();
 }
 
+final homeScaffoldKey = GlobalKey<ScaffoldState>();
+final searchScaffoldKey = GlobalKey<ScaffoldState>();
+
 class _MapState extends State<Map> {
-  GoogleMapController mapController;
-  GoogleMapsServices _googleMapsServices = GoogleMapsServices();
-
-  LatLng _lastPosition = initialPosition;
-  final Set<Marker> _markers = {};
-  final Set<Polyline> _polyLines = {};
-
-  @override
-  void initState() {
-    super.initState();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return _initialPosition == null
+    final appState = Provider.of<AppState>(context);
+    return appState.initialPosition == null
         ? Container(
-            alignment: Alignment.center,
-            child: Center(
-              child: CircularProgressIndicator(),
-            ),
-          )
+            child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  SpinKitRotatingCircle(
+                    color: Colors.black,
+                    size: 50.0,
+                  ),
+                ],
+              ),
+              SizedBox(
+                height: 10,
+              ),
+              Visibility(
+                visible: appState.locationServiceActive == false,
+                child: Text(
+                  "Please enable location services!",
+                  style: TextStyle(color: Colors.grey, fontSize: 18),
+                ),
+              )
+            ],
+          ))
         : Stack(
             children: <Widget>[
               GoogleMap(
                 initialCameraPosition: CameraPosition(
-                  target: _initialPosition,
-                  zoom: 20,
+                  target: appState.initialPosition,
+                  zoom: 10,
                 ),
-                onMapCreated: onCreated,
+                onMapCreated: appState.onCreated,
                 myLocationEnabled: true,
                 mapType: MapType.normal,
                 compassEnabled: true,
-                markers: _markers,
-                onCameraMove: _onCameraMove,
-                polylines: _polyLines,
+                markers: appState.markers,
+                onCameraMove: appState.onCameraMove,
+                polylines: appState.polyLines,
               ),
               Positioned(
                 top: 50.0,
@@ -88,7 +101,15 @@ class _MapState extends State<Map> {
                   ),
                   child: TextField(
                     cursorColor: Colors.black,
-                    controller: locationController,
+                    controller: appState.locationController,
+                    onTap: () async {
+                      Prediction p = await PlacesAutocomplete.show(
+                        context: context,
+                        apiKey: apiKey,
+                        language: "ar",
+                        components: [Component(Component.country, "eg")],
+                      );
+                    },
                     decoration: InputDecoration(
                       icon: Container(
                         margin: EdgeInsets.only(left: 20, top: 5),
@@ -126,10 +147,19 @@ class _MapState extends State<Map> {
                   ),
                   child: TextField(
                     cursorColor: Colors.black,
-                    controller: destinationController,
+                    onTap: () async {
+                      Prediction p = await PlacesAutocomplete.show(
+                        context: context,
+                        apiKey: apiKey,
+                        language: "ar",
+                        components: [Component(Component.country, "eg")],
+                      );
+                      displayPrediction(p, homeScaffoldKey.currentState);
+                    },
+                    controller: appState.destinationController,
                     textInputAction: TextInputAction.go,
                     onSubmitted: (value) {
-                      sendRequest(value);
+                      appState.sendRequest(value);
                     },
                     decoration: InputDecoration(
                       icon: Container(
@@ -148,130 +178,40 @@ class _MapState extends State<Map> {
                   ),
                 ),
               ),
-//        Positioned(
-//          top: 40,
-//          right: 10,
-//          child: FloatingActionButton(
-//            onPressed: _onAddMarkerPressed,
-//            tooltip: "add marker",
-//            backgroundColor: darkBlue,
-//            child: Icon(
-//              Icons.add_location,
-//              color: white,
-//            ),
-//          ),
-//        ),
+//              Positioned(
+//                top: 40,
+//                right: 10,
+//                child: FloatingActionButton(
+////                  onPressed: appState.markers,
+//                  backgroundColor: darkBlue,
+//                  child: Icon(
+//                    Icons.add_location,
+//                    color: white,
+//                  ),
+//                ),
+//              ),
             ],
           );
   }
+}
 
-  void onCreated(GoogleMapController controller) {
-    setState(() {
-      mapController = controller;
-    });
-  }
+void onError(PlacesAutocompleteResponse response) {
+  homeScaffoldKey.currentState.showSnackBar(
+    SnackBar(content: Text(response.errorMessage)),
+  );
+}
 
-  void _onCameraMove(CameraPosition position) {
-    setState(() {
-      _lastPosition = position.target;
-    });
-  }
+GoogleMapsPlaces _places = GoogleMapsPlaces(apiKey: apiKey);
 
-  // ! ADD A MARKER ON THE MAP
+Future<Null> displayPrediction(Prediction p, ScaffoldState scaffold) async {
+  if (p != null) {
+    // get detail (lat/lng)
+    PlacesDetailsResponse detail = await _places.getDetailsByPlaceId(p.placeId);
+    final lat = detail.result.geometry.location.lat;
+    final lng = detail.result.geometry.location.lng;
 
-  void _addMarker(LatLng location, String address) {
-    setState(() {
-      _markers.add(
-        Marker(
-          markerId: MarkerId(
-            _lastPosition.toString(),
-          ),
-          position: location,
-          infoWindow: InfoWindow(
-            title: "address",
-            snippet: "go here",
-          ),
-          icon: BitmapDescriptor.defaultMarker,
-        ),
-      );
-    });
-  } // ! CREATE LAGLNG LIST
-
-  void createRoute(String encodedPoly) {
-    setState(() {
-      _polyLines.add(
-        Polyline(
-          polylineId: PolylineId(
-            _lastPosition.toString(),
-          ),
-          width: 10,
-          color: Colors.black,
-          points: _convertToLatLng(decodePoly(encodedPoly)),
-        ),
-      );
-    });
-  }
-
-/* from our Api we will get string that will need to convert it.
-* the string will be converted to double number, after that
-* by the following method, it will be converted from double to regular latitude and longitude*/
-
-  // This method to convert list of doubles into latlng
-
-  List<LatLng> _convertToLatLng(List points) {
-    List<LatLng> result = <LatLng>[];
-    for (int i = 0; i < points.length; i++) {
-      if (i % 2 != 0) {
-        result.add(LatLng(points[i - 1], points[i]));
-      }
-    }
-    return result;
-  }
-
-  // !DECODE POLY
-  List decodePoly(String poly) {
-    var list = poly.codeUnits;
-    var lList = new List();
-    int index = 0;
-    int len = poly.length;
-    int c = 0;
-    // repeating until all attributes are decoded
-    do {
-      var shift = 0;
-      int result = 0;
-
-      // for decoding value of one attribute
-      do {
-        c = list[index] - 63;
-        result |= (c & 0x1F) << (shift * 5);
-        index++;
-        shift++;
-      } while (c >= 32);
-      /* if value is negative then bitwise not the value */
-      if (result & 1 == 1) {
-        result = ~result;
-      }
-      var result1 = (result >> 1) * 0.00001;
-      lList.add(result1);
-    } while (index < len);
-
-    /*adding to previous value as done in encoding */
-    for (var i = 2; i < lList.length; i++) lList[i] += lList[i - 2];
-
-    print(lList.toString());
-
-    return lList;
-  }
-
-  void sendRequest(String intendedLocation) async {
-    List<Placemark> placemark =
-        await Geolocator().placemarkFromAddress(intendedLocation);
-    double latitude = placemark[0].position.latitude;
-    double longitude = placemark[0].position.longitude;
-    LatLng destination = LatLng(latitude, longitude);
-    _addMarker(destination, intendedLocation);
-    String route = await _googleMapsServices.getRouteCoordinates(
-        _initialPosition, destination);
-    createRoute(route);
+    scaffold.showSnackBar(
+      SnackBar(content: Text("${p.description} - $lat/$lng")),
+    );
   }
 }
